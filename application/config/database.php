@@ -75,10 +75,10 @@ $query_builder = TRUE;
 
 $db['default'] = array(
 	'dsn'	=> '',
-	'hostname' => 'localhost',
-	'username' => 'root',
-	'password' => '',
-	'database' => 'db_olshop',
+	'hostname' => 'bfowdubjmqwz2fnracgg-mysql.services.clever-cloud.com',
+	'username' => 'unhzmtkrlzjz5yic',
+	'password' => 'DGFoF6WbXP8tLmTLQdmg',
+	'database' => 'bfowdubjmqwz2fnracgg',
 	'dbdriver' => 'mysqli',
 	'dbprefix' => '',
 	'pconnect' => FALSE,

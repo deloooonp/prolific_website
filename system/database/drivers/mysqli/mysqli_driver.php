@@ -115,20 +115,119 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 * @param	bool	$persistent
 	 * @return	object
 	 */
-	function db_connect()
-{
-    if(isset($this->socket)){
-        return mysqli_connect(null, $this->username, null, $this->database, null, $this->socket);
-    }
-    elseif ($this->port != ”)
-    {
-        return mysqli_connect($this->hostname, $this->username, $this->password, $this->database, $this->port);
-    }
-    else
-    {
-        return mysqli_connect($this->hostname, $this->username, $this->password, $this->database);
-    }
-}
+	public function db_connect($persistent = FALSE)
+	{
+		// PHP 8.1 changes default error handling mode from silent to exceptions - reverse that
+		if (is_php('8.1'))
+		{
+			$mysqli_driver = new mysqli_driver();
+			$mysqli_driver->report_mode = MYSQLI_REPORT_OFF;
+		}
+
+		// Do we have a socket path?
+		if ($this->hostname[0] === '/')
+		{
+			$hostname = NULL;
+			$port = NULL;
+			$socket = $this->hostname;
+		}
+		else
+		{
+			$hostname = ($persistent === TRUE)
+				? 'p:'.$this->hostname : $this->hostname;
+			$port = empty($this->port) ? NULL : $this->port;
+			$socket = NULL;
+		}
+
+		$client_flags = ($this->compress === TRUE) ? MYSQLI_CLIENT_COMPRESS : 0;
+		$this->_mysqli = mysqli_init();
+
+		$this->_mysqli->options(MYSQLI_OPT_CONNECT_TIMEOUT, 10);
+
+		if (isset($this->stricton))
+		{
+			if ($this->stricton)
+			{
+				$this->_mysqli->options(MYSQLI_INIT_COMMAND, 'SET SESSION sql_mode = CONCAT(@@sql_mode, ",", "STRICT_ALL_TABLES")');
+			}
+			else
+			{
+				$this->_mysqli->options(MYSQLI_INIT_COMMAND,
+					'SET SESSION sql_mode =
+					REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+					@@sql_mode,
+					"STRICT_ALL_TABLES,", ""),
+					",STRICT_ALL_TABLES", ""),
+					"STRICT_ALL_TABLES", ""),
+					"STRICT_TRANS_TABLES,", ""),
+					",STRICT_TRANS_TABLES", ""),
+					"STRICT_TRANS_TABLES", "")'
+				);
+			}
+		}
+
+		if (is_array($this->encrypt))
+		{
+			$ssl = array();
+			empty($this->encrypt['ssl_key'])    OR $ssl['key']    = $this->encrypt['ssl_key'];
+			empty($this->encrypt['ssl_cert'])   OR $ssl['cert']   = $this->encrypt['ssl_cert'];
+			empty($this->encrypt['ssl_ca'])     OR $ssl['ca']     = $this->encrypt['ssl_ca'];
+			empty($this->encrypt['ssl_capath']) OR $ssl['capath'] = $this->encrypt['ssl_capath'];
+			empty($this->encrypt['ssl_cipher']) OR $ssl['cipher'] = $this->encrypt['ssl_cipher'];
+
+			if (isset($this->encrypt['ssl_verify']))
+			{
+				$client_flags |= MYSQLI_CLIENT_SSL;
+
+				if ($this->encrypt['ssl_verify'])
+				{
+					defined('MYSQLI_OPT_SSL_VERIFY_SERVER_CERT') && $this->_mysqli->options(MYSQLI_OPT_SSL_VERIFY_SERVER_CERT, TRUE);
+				}
+				// Apparently (when it exists), setting MYSQLI_OPT_SSL_VERIFY_SERVER_CERT
+				// to FALSE didn't do anything, so PHP 5.6.16 introduced yet another
+				// constant ...
+				//
+				// https://secure.php.net/ChangeLog-5.php#5.6.16
+				// https://bugs.php.net/bug.php?id=68344
+				elseif (defined('MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT'))
+				{
+					$client_flags |= MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT;
+				}
+			}
+
+			if ( ! empty($ssl))
+			{
+				$client_flags |= MYSQLI_CLIENT_SSL;
+				$this->_mysqli->ssl_set(
+					isset($ssl['key'])    ? $ssl['key']    : NULL,
+					isset($ssl['cert'])   ? $ssl['cert']   : NULL,
+					isset($ssl['ca'])     ? $ssl['ca']     : NULL,
+					isset($ssl['capath']) ? $ssl['capath'] : NULL,
+					isset($ssl['cipher']) ? $ssl['cipher'] : NULL
+				);
+			}
+		}
+
+		if ($this->_mysqli->real_connect($hostname, $this->username, $this->password, $this->database, $port, $socket, $client_flags))
+		{
+			// Prior to version 5.7.3, MySQL silently downgrades to an unencrypted connection if SSL setup fails
+			if (
+				($client_flags & MYSQLI_CLIENT_SSL)
+				&& version_compare($this->_mysqli->client_info, '5.7.3', '<=')
+				&& empty($this->_mysqli->query("SHOW STATUS LIKE 'ssl_cipher'")->fetch_object()->Value)
+			)
+			{
+				$this->_mysqli->close();
+				$message = 'MySQLi was configured for an SSL connection, but got an unencrypted connection instead!';
+				log_message('error', $message);
+				return ($this->db_debug) ? $this->display_error($message, '', TRUE) : FALSE;
+			}
+
+			return $this->_mysqli;
+		}
+
+		return FALSE;
+	}
 
 	// --------------------------------------------------------------------
 
